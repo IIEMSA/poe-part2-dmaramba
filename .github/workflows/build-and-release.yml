@@ -2,11 +2,15 @@ name: Build and Release
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, main ]
     tags:
       - 'v*'
   pull_request:
-    branches: [ master ]
+    branches: [ master, main ]
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  BUILD_CONFIGURATION: 'Release'
 
 jobs:
   build:
@@ -18,21 +22,21 @@ jobs:
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: '10.0.x'
+        dotnet-version: ${{ env.DOTNET_VERSION }}
 
     - name: Restore dependencies
-      run: dotnet restore WPFDemo/WPFDemo.csproj
+      run: dotnet restore
 
     - name: Build
-      run: dotnet build WPFDemo/WPFDemo.csproj --configuration Release --no-restore
+      run: dotnet build --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore
 
     - name: Publish
-      run: dotnet publish WPFDemo/WPFDemo.csproj --configuration Release --output ./publish --no-build
+      run: dotnet publish --configuration ${{ env.BUILD_CONFIGURATION }} --output ./publish --no-build
 
     - name: Upload Build Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: WPFDemo-Build
+        name: Build-${{ github.sha }}
         path: ./publish
 
   release:
@@ -46,24 +50,30 @@ jobs:
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: '10.0.x'
+        dotnet-version: ${{ env.DOTNET_VERSION }}
 
     - name: Restore dependencies
-      run: dotnet restore WPFDemo/WPFDemo.csproj
+      run: dotnet restore
 
     - name: Build
-      run: dotnet build WPFDemo/WPFDemo.csproj --configuration Release --no-restore
+      run: dotnet build --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore
 
     - name: Publish
-      run: dotnet publish WPFDemo/WPFDemo.csproj --configuration Release --output ./release --no-build
+      run: dotnet publish --configuration ${{ env.BUILD_CONFIGURATION }} --output ./release --no-build
+
+    - name: Get project name
+      id: project
+      run: |
+        $projectName = (Get-ChildItem -Filter *.csproj -Recurse | Select-Object -First 1).BaseName
+        echo "name=$projectName" >> $env:GITHUB_OUTPUT
 
     - name: Create ZIP Archive
-      run: Compress-Archive -Path ./release/* -DestinationPath CyberbotChat-${{ github.ref_name }}.zip
+      run: Compress-Archive -Path ./release/* -DestinationPath ${{ steps.project.outputs.name }}-${{ github.ref_name }}.zip
 
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
-        files: CyberbotChat-${{ github.ref_name }}.zip
+        files: ${{ steps.project.outputs.name }}-${{ github.ref_name }}.zip
         generate_release_notes: true
         draft: false
         prerelease: false
