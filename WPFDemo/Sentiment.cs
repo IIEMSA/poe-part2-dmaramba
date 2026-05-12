@@ -35,7 +35,6 @@ namespace WPFDemo
             return sentimentResponse;
         }
 
-        // Method that uses the delegate to process sentiment
         private string ProcessSentiment(string sentiment, string input, SentimentResponseHandler handler)
         {
             // Invoke the event if there are subscribers
