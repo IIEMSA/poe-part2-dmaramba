@@ -45,6 +45,9 @@ jobs:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     permissions:
       contents: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      should_tag: ${{ steps.tag.outputs.should_tag }}
 
     steps:
     - uses: actions/checkout@v4
@@ -94,9 +97,9 @@ jobs:
           });
 
   release:
-    needs: build
+    needs: [build, autotag]
     runs-on: windows-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: always() && needs.build.result == 'success' && (startsWith(github.ref, 'refs/tags/v') || needs.autotag.outputs.should_tag == 'true')
     permissions:
       contents: write
 
@@ -123,13 +126,31 @@ jobs:
         $projectName = (Get-ChildItem -Filter *.csproj -Recurse | Select-Object -First 1).BaseName
         echo "name=$projectName" >> $env:GITHUB_OUTPUT
 
+    - name: Resolve release tag
+      id: releasetag
+      shell: pwsh
+      run: |
+        if ("${{ startsWith(github.ref, 'refs/tags/v') }}" -eq "true") {
+          $tag = "${{ github.ref_name }}"
+        }
+        else {
+          $tag = "${{ needs.autotag.outputs.tag }}"
+        }
+
+        if (-not $tag) {
+          throw "Could not determine release tag."
+        }
+
+        echo "tag=$tag" >> $env:GITHUB_OUTPUT
+
     - name: Create ZIP Archive
-      run: Compress-Archive -Path ./release/* -DestinationPath ${{ steps.project.outputs.name }}-${{ github.ref_name }}.zip
+      run: Compress-Archive -Path ./release/* -DestinationPath ${{ steps.project.outputs.name }}-${{ steps.releasetag.outputs.tag }}.zip
 
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
-        files: ${{ steps.project.outputs.name }}-${{ github.ref_name }}.zip
+        tag_name: ${{ steps.releasetag.outputs.tag }}
+        files: ${{ steps.project.outputs.name }}-${{ steps.releasetag.outputs.tag }}.zip
         generate_release_notes: true
         draft: false
         prerelease: false
