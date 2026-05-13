@@ -24,14 +24,17 @@ jobs:
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
 
+    - name: Clean
+      run: dotnet clean
+
     - name: Restore dependencies
       run: dotnet restore
 
     - name: Build
-      run: dotnet build --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore
+      run: dotnet build --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore --runtime win-x64
 
     - name: Publish
-      run: dotnet publish --configuration ${{ env.BUILD_CONFIGURATION }} --output ./publish --no-build
+      run: dotnet publish --configuration ${{ env.BUILD_CONFIGURATION }} --output ./publish --no-build --runtime win-x64
 
     - name: Upload Build Artifact
       uses: actions/upload-artifact@v4
@@ -111,14 +114,17 @@ jobs:
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
 
+    - name: Clean
+      run: dotnet clean
+
     - name: Restore dependencies
       run: dotnet restore
 
     - name: Build
-      run: dotnet build --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore
+      run: dotnet build --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore --runtime win-x64
 
     - name: Publish
-      run: dotnet publish --configuration ${{ env.BUILD_CONFIGURATION }} --output ./release --no-build
+      run: dotnet publish --configuration ${{ env.BUILD_CONFIGURATION }} --output ./release --no-build --runtime win-x64
 
     - name: Get project name
       id: project
