@@ -1,0 +1,166 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ master, main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ master, main ]
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  BUILD_CONFIGURATION: 'Release'
+  PROJECT_PATH: 'WPFDemo/WPFDemo.csproj'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Clean
+      run: dotnet clean ${{ env.PROJECT_PATH }}
+
+    - name: Restore dependencies
+      run: dotnet restore ${{ env.PROJECT_PATH }}
+
+    - name: Build
+      run: dotnet build ${{ env.PROJECT_PATH }} --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore
+
+    - name: Publish
+      run: dotnet publish ${{ env.PROJECT_PATH }} --configuration ${{ env.BUILD_CONFIGURATION }} --output ./publish --no-build
+
+    - name: Upload Build Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: Build-${{ github.sha }}
+        path: ./publish
+
+  autotag:
+    needs: build
+    runs-on: windows-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      should_tag: ${{ steps.tag.outputs.should_tag }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Determine next tag
+      id: tag
+      shell: pwsh
+      run: |
+        git fetch --tags --force
+
+        $existingOnHead = git tag --points-at HEAD "v*" | Select-Object -First 1
+        if ($existingOnHead) {
+          echo "should_tag=false" >> $env:GITHUB_OUTPUT
+          echo "tag=$existingOnHead" >> $env:GITHUB_OUTPUT
+          exit 0
+        }
+
+        $latest = git tag --list "v*" --sort=-v:refname | Select-Object -First 1
+        if (-not $latest) {
+          $latest = "v0.0.0"
+        }
+
+        if ($latest -notmatch '^v(\d+)\.(\d+)\.(\d+)$') {
+          throw "Latest tag '$latest' is not in vMAJOR.MINOR.PATCH format"
+        }
+
+        $major = [int]$matches[1]
+        $minor = [int]$matches[2]
+        $patch = [int]$matches[3] + 1
+        $next = "v$major.$minor.$patch"
+
+        echo "should_tag=true" >> $env:GITHUB_OUTPUT
+        echo "tag=$next" >> $env:GITHUB_OUTPUT
+
+    - name: Create tag
+      if: steps.tag.outputs.should_tag == 'true'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          await github.rest.git.createRef({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            ref: `refs/tags/${{ steps.tag.outputs.tag }}`,
+            sha: context.sha
+          });
+
+  release:
+    needs: [build, autotag]
+    runs-on: windows-latest
+    if: always() && needs.build.result == 'success' && (startsWith(github.ref, 'refs/tags/v') || needs.autotag.outputs.should_tag == 'true')
+    permissions:
+      contents: write
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Clean
+      run: dotnet clean ${{ env.PROJECT_PATH }}
+
+    - name: Restore dependencies
+      run: dotnet restore ${{ env.PROJECT_PATH }}
+
+    - name: Build
+      run: dotnet build ${{ env.PROJECT_PATH }} --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore
+
+    - name: Publish
+      run: dotnet publish ${{ env.PROJECT_PATH }} --configuration ${{ env.BUILD_CONFIGURATION }} --output ./release --no-build
+
+    - name: Get project name
+      id: project
+      shell: pwsh
+      run: |
+        $projectName = [System.IO.Path]::GetFileNameWithoutExtension("${{ env.PROJECT_PATH }}")
+        echo "project_name=$projectName" >> $env:GITHUB_OUTPUT
+
+    - name: Resolve release tag
+      id: releasetag
+      shell: pwsh
+      run: |
+        if ("${{ startsWith(github.ref, 'refs/tags/v') }}" -eq "true") {
+          $tag = "${{ github.ref_name }}"
+        }
+        else {
+          $tag = "${{ needs.autotag.outputs.tag }}"
+        }
+
+        if (-not $tag) {
+          throw "Could not determine release tag."
+        }
+
+        echo "tag=$tag" >> $env:GITHUB_OUTPUT
+
+    - name: Create ZIP Archive
+      run: Compress-Archive -Path ./release/* -DestinationPath ${{ steps.project.outputs.project_name }}-${{ steps.releasetag.outputs.tag }}.zip
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.releasetag.outputs.tag }}
+        files: ${{ steps.project.outputs.project_name }}-${{ steps.releasetag.outputs.tag }}.zip
+        generate_release_notes: true
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
