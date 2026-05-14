@@ -11,39 +11,10 @@ on:
 env:
   DOTNET_VERSION: '10.0.x'
   BUILD_CONFIGURATION: 'Release'
+  PROJECT_PATH: 'WPFDemo/WPFDemo.csproj'
 
 jobs:
-  build:
-    runs-on: windows-latest
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: ${{ env.DOTNET_VERSION }}
-
-    - name: Clean
-      run: dotnet clean
-
-    - name: Restore dependencies
-      run: dotnet restore
-
-    - name: Build
-      run: dotnet build --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore
-
-    - name: Publish
-      run: dotnet publish --configuration ${{ env.BUILD_CONFIGURATION }} --output ./publish --no-build
-
-    - name: Upload Build Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: Build-${{ github.sha }}
-        path: ./publish
-
   autotag:
-    needs: build
     runs-on: windows-latest
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     permissions:
@@ -100,9 +71,9 @@ jobs:
           });
 
   release:
-    needs: [build, autotag]
+    needs: autotag
     runs-on: windows-latest
-    if: always() && needs.build.result == 'success' && (startsWith(github.ref, 'refs/tags/v') || needs.autotag.outputs.should_tag == 'true')
+    if: always() && (startsWith(github.ref, 'refs/tags/v') || needs.autotag.outputs.should_tag == 'true')
     permissions:
       contents: write
 
@@ -115,22 +86,23 @@ jobs:
         dotnet-version: ${{ env.DOTNET_VERSION }}
 
     - name: Clean
-      run: dotnet clean
+      run: dotnet clean ${{ env.PROJECT_PATH }}
 
     - name: Restore dependencies
-      run: dotnet restore
+      run: dotnet restore ${{ env.PROJECT_PATH }}
 
     - name: Build
-      run: dotnet build --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore
+      run: dotnet build ${{ env.PROJECT_PATH }} --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore
 
     - name: Publish
-      run: dotnet publish --configuration ${{ env.BUILD_CONFIGURATION }} --output ./release --no-build
+      run: dotnet publish ${{ env.PROJECT_PATH }} --configuration ${{ env.BUILD_CONFIGURATION }} --output ./release --no-build
 
     - name: Get project name
       id: project
+      shell: pwsh
       run: |
-        $projectName = (Get-ChildItem -Filter *.csproj -Recurse | Select-Object -First 1).BaseName
-        echo "name=$projectName" >> $env:GITHUB_OUTPUT
+        $projectName = [System.IO.Path]::GetFileNameWithoutExtension("${{ env.PROJECT_PATH }}")
+        echo "project_name=$projectName" >> $env:GITHUB_OUTPUT
 
     - name: Resolve release tag
       id: releasetag
@@ -150,13 +122,13 @@ jobs:
         echo "tag=$tag" >> $env:GITHUB_OUTPUT
 
     - name: Create ZIP Archive
-      run: Compress-Archive -Path ./release/* -DestinationPath ${{ steps.project.outputs.name }}-${{ steps.releasetag.outputs.tag }}.zip
+      run: Compress-Archive -Path ./release/* -DestinationPath ${{ steps.project.outputs.project_name }}-${{ steps.releasetag.outputs.tag }}.zip
 
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ steps.releasetag.outputs.tag }}
-        files: ${{ steps.project.outputs.name }}-${{ steps.releasetag.outputs.tag }}.zip
+        files: ${{ steps.project.outputs.project_name }}-${{ steps.releasetag.outputs.tag }}.zip
         generate_release_notes: true
         draft: false
         prerelease: false
